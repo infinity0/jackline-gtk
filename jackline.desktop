@@ -1,0 +1,7 @@
+[Desktop Entry]
+Version=1.0
+Name=Jackline
+Exec=/home/panton/bin/gtk-jackline
+Icon=/usr/share/icons/HighContrast/scalable/apps-extra/internet-group-chat.svg
+Terminal=false
+Type=Application

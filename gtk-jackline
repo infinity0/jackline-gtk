@@ -10,7 +10,7 @@ from watchdog.events import FileSystemEventHandler, FileModifiedEvent, LoggingEv
 
 WATCH_FILENAME = "/home/panton/.config/ocaml-xmpp-client/"
 COMMAND = "/home/panton/.opam/4.02.2/bin/jackline"
-PROGNAME = "gtkJackline"
+PROGNAME = "gtk-jackline"
 
 gtk.gdk.threads_init()    
 
@@ -41,6 +41,8 @@ window.set_wmclass (PROGNAME, PROGNAME)
 windowicon = window.render_icon(gtk.STOCK_UNDERLINE, gtk.ICON_SIZE_LARGE_TOOLBAR)
 window.set_icon(windowicon)
 window.show_all()
+
+v.feed_child("/connect\n")
 
 gtk.main()
 
