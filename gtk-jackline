@@ -18,7 +18,7 @@ pynotify.init(PROGNAME)
 
 class notifyChange(FileSystemEventHandler):
     def on_modified(self, event):
-        if event.src_path.endswith("/notification.state"):
+        if event.src_path.endswith("/notification.state") and not window.has_toplevel_focus():
             state = file(event.src_path, "r").read()
             n = pynotify.Notification(PROGNAME, state)
             n.set_urgency(pynotify.URGENCY_NORMAL)
