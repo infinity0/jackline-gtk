@@ -1,50 +1,114 @@
 #!/usr/bin/env python
- 
+# Depends: python-vte, python-gtk2, python-notify, python-watchdog, python-canberra
+# Ideally you would also have some sound theme installed, like sound-theme-freedesktop
+
+import os.path
+
 import gtk
+import pynotify
 import vte
 
-import pynotify
+try:
+    import pycanberra
+except ImportError:
+    # c+p minimal functionality that we need from https://github.com/psykoyiko/pycanberra/
+    # yes this is hacky, bite my shiny metal a...
+    import ctypes
+    def pycanberra(): return
+    pycanberra.CA_PROP_EVENT_ID = "event.id"
+    class Canberra(object):
+        def __init__(self):
+            self._handle = ctypes.c_void_p()
+            self._libhandle = ctypes.CDLL("libcanberra.so.0")
+            self._libhandle.ca_context_create(ctypes.byref(self._handle))
+        def destroy(self):
+            res = self._libhandle.ca_context_destroy(self._handle)
+            if res != 0:
+                raise RuntimeError(res, "Failed to destroy context")
+        def play(self, playId, *args):
+            res = self._libhandle.ca_context_play(self._handle, playId, *args)
+            if res != 0:
+                raise RuntimeError(res, "Failed to play!")
+    pycanberra.Canberra = Canberra
+    del Canberra
 
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileModifiedEvent, LoggingEventHandler
 
-WATCH_FILENAME = "/home/panton/.config/ocaml-xmpp-client/"
-COMMAND = "/home/panton/.opam/4.02.2/bin/jackline"
+WATCH_DIR = os.path.expanduser("~/.config/ocaml-xmpp-client/")
+NOTIFICATION_FN = "notification.state"
+COMMAND = "jackline"
 PROGNAME = "gtk-jackline"
 
-gtk.gdk.threads_init()    
+class NotifyChange(FileSystemEventHandler):
+    def __init__(self, window, base_dir):
+        super(NotifyChange, self).__init__()
+        self._window = window
+        self._base_dir = base_dir
+        self._notification_fn = os.path.join(base_dir, NOTIFICATION_FN)
+        self._icons = gtk.icon_theme_get_default()
+        self._mail_unread_icon = self._icons.load_icon("mail-unread", 48, 0)
+        self._window.set_urgency_hint(self.has_notifications())
+        try:
+            self._canberra = pycanberra.Canberra()
+        except Exception:
+            self._canberra = None
 
-pynotify.init(PROGNAME)
+    def has_notifications(self):
+        # this is *highly dependent* on jackline's notification.state format.
+        # they need to document this and commit to making it stable
+        state = file(self._notification_fn, "r").read()
+        return "notification" in state
 
-class notifyChange(FileSystemEventHandler):
     def on_modified(self, event):
-        if event.src_path.endswith("/notification.state") and not window.has_toplevel_focus():
-            state = file(event.src_path, "r").read()
-            n = pynotify.Notification(PROGNAME, state)
-            n.set_urgency(pynotify.URGENCY_NORMAL)
-            n.show()
+        if event.src_path != self._notification_fn:
+            return
+        has_notifications = self.has_notifications()
+        self._window.set_urgency_hint(has_notifications)
+        if not has_notifications:
+            return
+        n = pynotify.Notification("Jackline IM client", "Message received")
+        n.set_urgency(pynotify.URGENCY_NORMAL)
+        n.set_category("im.received")
+        if self._mail_unread_icon:
+            n.set_icon_from_pixbuf(self._mail_unread_icon)
+        n.show()
+        try:
+            self._canberra.play(0, pycanberra.CA_PROP_EVENT_ID, "message-new-instant", None)
+        except Exception:
+            pass # no sound will be played, oh well...
 
-event_handler = LoggingEventHandler()
-observer = Observer()
-observer.schedule(notifyChange(), WATCH_FILENAME, recursive=True)
-observer.start()
+    def __exit__(self):
+        self._canberra.destroy()
 
+# init
+gtk.gdk.threads_init()
+pynotify.init(PROGNAME)
 v = vte.Terminal()
-v.connect("child-exited", lambda term: gtk.main_quit())
-v.fork_command(COMMAND)
-
 window = gtk.Window()
-window.add(v)
-window.connect('delete-event', lambda window, event: gtk.main_quit())
 window.set_title(PROGNAME)
-window.set_wmclass (PROGNAME, PROGNAME)
+window.set_wmclass(PROGNAME, PROGNAME)
 windowicon = window.render_icon(gtk.STOCK_UNDERLINE, gtk.ICON_SIZE_LARGE_TOOLBAR)
 window.set_icon(windowicon)
+
+# set up notify hooks
+event_handler = LoggingEventHandler()
+observer = Observer()
+# TODO: we should call NotifyChange.__exit__ via python's "with" syntax
+observer.schedule(NotifyChange(window, WATCH_DIR), WATCH_DIR, recursive=True)
+observer.start()
+
+# start jackline
+v.connect("child-exited", lambda term: gtk.main_quit())
+v.fork_command(COMMAND)
+window.add(v)
+window.connect('delete-event', lambda window, event: gtk.main_quit())
+window.maximize()
 window.show_all()
+#v.feed_child("/connect\n") # uncomment to auto-connect.
+# this really should be a jackline config option though.
 
-v.feed_child("/connect\n")
-
+# main loop
 gtk.main()
-
 observer.stop()
 observer.join()
