@@ -1,0 +1,13 @@
+#!/bin/sh
+# Install this as /usr/local/bin/jackline, if need to run your OPAM jackline in
+# situations where your environment is not set up properly, e.g. desktop menu.
+
+if [ -f "$HOME/.opam/opam-init/variables.sh" ]; then
+	. "$HOME/.opam/opam-init/variables.sh" >/dev/null 2>/dev/null || true
+fi
+test "$(which jackline)" != "$0" || {
+	# avoid infinite loop
+	echo >&2 "jackline not found"
+	exit 1
+}
+exec jackline "$@"

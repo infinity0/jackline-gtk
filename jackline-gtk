@@ -38,8 +38,8 @@ from watchdog.events import FileSystemEventHandler, FileModifiedEvent, LoggingEv
 WATCH_DIR = os.path.expanduser("~/.config/ocaml-xmpp-client/")
 NOTIFICATION_FN = "notification.state"
 COMMAND = "jackline"
-PROGNAME = "gtk-jackline"
-PROGTITLE = "Jackline IM client"
+PROGNAME = "jackline-gtk"
+PROGTITLE = "Jackline Messenger"
 
 class NotifyChange(FileSystemEventHandler):
     def __init__(self, window, base_dir):
