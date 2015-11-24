@@ -58,8 +58,8 @@ class NotifyChange(FileSystemEventHandler):
     def has_notifications(self):
         # this is *highly dependent* on jackline's notification.state format.
         # they need to document this and commit to making it stable
-        state = file(self._notification_fn, "r").read()
-        return "notification" in state
+        with open(self._notification_fn) as fp:
+            return "notification" in fp.read()
 
     def on_modified(self, event):
         if event.src_path != self._notification_fn:
