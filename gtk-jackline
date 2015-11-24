@@ -39,6 +39,7 @@ WATCH_DIR = os.path.expanduser("~/.config/ocaml-xmpp-client/")
 NOTIFICATION_FN = "notification.state"
 COMMAND = "jackline"
 PROGNAME = "gtk-jackline"
+PROGTITLE = "Jackline IM client"
 
 class NotifyChange(FileSystemEventHandler):
     def __init__(self, window, base_dir):
@@ -67,7 +68,7 @@ class NotifyChange(FileSystemEventHandler):
         self._window.set_urgency_hint(has_notifications)
         if not has_notifications:
             return
-        n = pynotify.Notification("Jackline IM client", "Message received")
+        n = pynotify.Notification(PROGTITLE, "Message received")
         n.set_urgency(pynotify.URGENCY_NORMAL)
         n.set_category("im.received")
         if self._mail_unread_icon:
@@ -86,8 +87,7 @@ gtk.gdk.threads_init()
 pynotify.init(PROGNAME)
 v = vte.Terminal()
 window = gtk.Window()
-window.set_title(PROGNAME)
-window.set_wmclass(PROGNAME, PROGNAME)
+window.set_title(PROGTITLE)
 windowicon = window.render_icon(gtk.STOCK_UNDERLINE, gtk.ICON_SIZE_LARGE_TOOLBAR)
 window.set_icon(windowicon)
 
