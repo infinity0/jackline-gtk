@@ -27,7 +27,7 @@ checkinstall-deb:
 	$(CHECKINSTALL) --nodoc -y --deldesc \
 	  --maintainer infinity0@pwned.gg \
 	  --pkgname "jackline-gtk" --pkgversion "0.0" \
-	  --requires "python-gi, gir1.2-gtk-3.0, gir1.2-vte-2.91, gir1.2-notify-0.7, sound-theme-freedesktop" \
+	  --requires "python3-gi, gir1.2-gtk-3.0, gir1.2-vte-2.91, gir1.2-notify-0.7, sound-theme-freedesktop" \
 	  $(MAKE) prefix=/usr install
 	-@test -e /usr/bin/jackline || echo \
 	  "You should run \`install -T jackline.opam /usr/local/bin/jackline\` since we" \

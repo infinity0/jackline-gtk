@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/python3
 # See Makefile for dependencies.
 #
 # For now, you also need to set this as your notification_callback:
@@ -6,8 +6,6 @@
 # dir="$(dirname "$0")"
 # h="$dir/jackline-gtk.fifo"
 # test -p "$h" && echo "$@" >> "$h"
-
-from __future__ import print_function
 
 import atexit
 import os
@@ -43,6 +41,7 @@ except ImportError:
             if res != 0:
                 raise RuntimeError(res, "Failed to destroy context")
         def play(self, playId, *args):
+            args = tuple(arg.encode("utf-8") if isinstance(arg, str) else arg for arg in args)
             res = self._libhandle.ca_context_play(self._handle, playId, *args)
             if res != 0:
                 raise RuntimeError(res, "Failed to play!")
