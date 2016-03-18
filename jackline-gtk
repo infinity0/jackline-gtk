@@ -1,11 +1,5 @@
 #!/usr/bin/python3
 # See Makefile for dependencies.
-#
-# For now, you also need to set this as your notification_callback:
-# #!/bin/sh
-# dir="$(dirname "$0")"
-# h="$dir/jackline-gtk.fifo"
-# test -p "$h" && echo "$@" >> "$h"
 
 import atexit
 import os
@@ -174,8 +168,8 @@ v.spawn_sync(
     Vte.PtyFlags.DEFAULT,
     os.getcwd(),
     ["/bin/sh", "-c",
-     '%s 3<%s "$@" || read -p "%s: $?; %s" x;' % (COMMAND, FIFO_OUT, ERREXITMSG0, ERREXITMSG1),
-     COMMAND, "--fd-gui", "3"],
+     '%s 3<%s 4>%s "$@" || read -p "%s: $?; %s" x;' % (COMMAND, FIFO_OUT, FIFO_IN, ERREXITMSG0, ERREXITMSG1),
+     COMMAND, "--fd-gui", "3", "--fd-nfy", "4"],
     ["%s=%s" % p for p in os.environ.items()],
     GLib.SpawnFlags.LEAVE_DESCRIPTORS_OPEN)
 window.add(v)
