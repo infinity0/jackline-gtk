@@ -87,17 +87,15 @@ class UINotify(object):
         except Exception:
             self._canberra = None
 
-    def has_notifications(self, line):
-        # this is *highly dependent* on jackline's notification.state format.
-        # they need to document this and commit to making it stable
-        return "notification" in line
-
     def handle_line(self, line):
-        has_notifications = self.has_notifications(line)
+        state, event, args = (line + " ").split(" ", 2)
+        has_notifications = "notification" in state
         self._window.set_urgency_hint(has_notifications)
-        if not has_notifications:
-            #print("got other notification: ", line)
-            return
+
+        if "notify" in event:
+            self.handle_notify()
+
+    def handle_notify(self):
         n = Notify.Notification.new(PROGTITLE, "Message received")
         n.set_urgency(Notify.Urgency.NORMAL)
         n.set_category("im.received")
@@ -130,9 +128,9 @@ class UIFocus(object):
 
     def cb_state(self, window, evt):
         if evt.new_window_state & Gdk.WindowState.FOCUSED:
-            self._app_focus_q.put("app_focus true")
+            self._app_focus_q.put("gui_focus true")
         else:
-            self._app_focus_q.put("app_focus false")
+            self._app_focus_q.put("gui_focus false")
 
 # init
 Gdk.threads_init()
@@ -169,9 +167,9 @@ v.spawn_sync(
     os.getcwd(),
     ["/bin/sh", "-c",
      '%s 3<%s 4>%s "$@" || read -p "%s: $?; %s" x;' % (COMMAND, FIFO_OUT, FIFO_IN, ERREXITMSG0, ERREXITMSG1),
-     COMMAND, "--fd-gui", "3", "--fd-nfy", "4"],
+     COMMAND, "--fd-gui", "/dev/fd/3", "--fd-nfy", "/dev/fd/4"],
     ["%s=%s" % p for p in os.environ.items()],
-    GLib.SpawnFlags.LEAVE_DESCRIPTORS_OPEN)
+    GLib.SpawnFlags.DEFAULT)
 window.add(v)
 window.connect("window-state-event", ui_focus.cb_state)
 window.connect('delete-event', cb_quit)
