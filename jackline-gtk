@@ -90,7 +90,7 @@ class UINotify(object):
     def handle_line(self, line):
         state, event, args = (line + " ").split(" ", 2)
         has_notifications = "notification" in state
-        self._window.set_urgency_hint(has_notifications)
+        GLib.idle_add(self._gtk_urgency, has_notifications)
 
         if "notify" in event:
             self.handle_notify()
@@ -101,6 +101,15 @@ class UINotify(object):
         n.set_category("im.received")
         if self._mail_unread_icon:
             n.set_icon_from_pixbuf(self._mail_unread_icon)
+        GLib.idle_add(self._gtk_notify, n)
+
+    # GTK stuff must be done via GLib.idle_add
+    # see https://wiki.gnome.org/Projects/PyGObject/Threading
+
+    def _gtk_urgency(self, urgency):
+        self._window.set_urgency_hint(urgency)
+
+    def _gtk_notify(self, n):
         n.show()
         try:
             self._canberra.play(0, pycanberra.CA_PROP_EVENT_ID, "message-new-instant", None)
