@@ -175,8 +175,8 @@ v.spawn_sync(
     Vte.PtyFlags.DEFAULT,
     os.getcwd(),
     ["/bin/sh", "-c",
-     '%s 3<%s 4>%s "$@" || read -p "%s: $?; %s" x;' % (COMMAND, FIFO_OUT, FIFO_IN, ERREXITMSG0, ERREXITMSG1),
-     COMMAND, "--fd-gui", "/dev/fd/3", "--fd-nfy", "/dev/fd/4"],
+     '%s -f \'%s\' 3<%s 4>%s "$@" || read -p "%s: $?; %s" x;' % (COMMAND, CONFIG_DIR, FIFO_OUT, FIFO_IN, ERREXITMSG0, ERREXITMSG1),
+     COMMAND, '-f', CONFIG_DIR, "--fd-gui", "/dev/fd/3", "--fd-nfy", "/dev/fd/4"],
     ["%s=%s" % p for p in os.environ.items()],
     GLib.SpawnFlags.DEFAULT)
 window.add(v)
