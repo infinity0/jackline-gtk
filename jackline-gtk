@@ -1,10 +1,12 @@
 #!/usr/bin/python3
 # See Makefile for dependencies.
 
+import argparse
 import atexit
 import os
 import os.path
 import queue
+import sys
 import threading
 import time
 
@@ -42,12 +44,9 @@ except ImportError:
     pycanberra.Canberra = Canberra
     del Canberra
 
-CONFIG_DIR = os.path.expanduser("~/.config/ocaml-xmpp-client/")
 COMMAND = "jackline"
 PROGNAME = "jackline-gtk"
 PROGTITLE = "Jackline Messenger"
-FIFO_IN = os.path.join(CONFIG_DIR, "jackline-gtk.fifo")
-FIFO_OUT = os.path.join(CONFIG_DIR, "jackline.fifo")
 ERREXITMSG0 = "jackline exited abnormally"
 ERREXITMSG1 = "press enter to continue..."
 
@@ -141,49 +140,63 @@ class UIFocus(object):
         else:
             self._app_focus_q.put("gui_focus false")
 
-# init
-Gdk.threads_init()
-Notify.init(PROGNAME)
-v = Vte.Terminal()
-window = Gtk.Window()
-window.set_title(PROGTITLE)
-windowicon = window.render_icon(Gtk.STOCK_UNDERLINE, Gtk.IconSize.LARGE_TOOLBAR)
-window.set_icon(windowicon)
+def main(args):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-f", dest="config_dir", metavar="DIR",
+        default="~/.config/ocaml-xmpp-client/",
+        help="configuration directory. (default:%(default)s)")
+    args = parser.parse_args(args)
 
-# set up notify hooks
-os.mkfifo(FIFO_IN); atexit.register(os.remove, FIFO_IN)
-def handle_incoming():
-    with UINotify(window) as observer:
-        serve_fifo(FIFO_IN, "r", lambda fp:
-            for_lines_in_file(fp, lambda line:
-                observer.handle_line(line)))
-start_thread(handle_incoming)
+    CONFIG_DIR = os.path.expanduser(args.config_dir)
+    FIFO_IN = os.path.join(CONFIG_DIR, "jackline-gtk.fifo")
+    FIFO_OUT = os.path.join(CONFIG_DIR, "jackline.fifo")
 
-# set up ui_focus hooks
-ui_focus = UIFocus()
-os.mkfifo(FIFO_OUT); atexit.register(os.remove, FIFO_OUT)
-def handle_outgoing():
-    serve_fifo(FIFO_OUT, "w", ui_focus.serve_fp)
-start_thread(handle_outgoing)
+    # init
+    Gdk.threads_init()
+    Notify.init(PROGNAME)
+    v = Vte.Terminal()
+    window = Gtk.Window()
+    window.set_title(PROGTITLE)
+    windowicon = window.render_icon(Gtk.STOCK_UNDERLINE, Gtk.IconSize.LARGE_TOOLBAR)
+    window.set_icon(windowicon)
 
-def cb_quit(o, e):
-    Gtk.main_quit()
+    # set up notify hooks
+    os.mkfifo(FIFO_IN); atexit.register(os.remove, FIFO_IN)
+    def handle_incoming():
+        with UINotify(window) as observer:
+            serve_fifo(FIFO_IN, "r", lambda fp:
+                for_lines_in_file(fp, lambda line:
+                    observer.handle_line(line)))
+    start_thread(handle_incoming)
 
-# start jackline
-v.connect("child-exited", cb_quit)
-v.spawn_sync(
-    Vte.PtyFlags.DEFAULT,
-    os.getcwd(),
-    ["/bin/sh", "-c",
-     '%s 3<%s 4>%s "$@" || read -p "%s: $?; %s" x;' % (COMMAND, FIFO_OUT, FIFO_IN, ERREXITMSG0, ERREXITMSG1),
-     COMMAND, "--fd-gui", "/dev/fd/3", "--fd-nfy", "/dev/fd/4"],
-    ["%s=%s" % p for p in os.environ.items()],
-    GLib.SpawnFlags.DEFAULT)
-window.add(v)
-window.connect("window-state-event", ui_focus.cb_state)
-window.connect('delete-event', cb_quit)
-window.maximize()
-window.show_all()
+    # set up ui_focus hooks
+    ui_focus = UIFocus()
+    os.mkfifo(FIFO_OUT); atexit.register(os.remove, FIFO_OUT)
+    def handle_outgoing():
+        serve_fifo(FIFO_OUT, "w", ui_focus.serve_fp)
+    start_thread(handle_outgoing)
 
-# main loop
-Gtk.main()
+    def cb_quit(o, e):
+        Gtk.main_quit()
+
+    # start jackline
+    v.connect("child-exited", cb_quit)
+    v.spawn_sync(
+        Vte.PtyFlags.DEFAULT,
+        os.getcwd(),
+        ["/bin/sh", "-c",
+         '%s "$@" || read -p "%s: $?; %s" x;' % (COMMAND, ERREXITMSG0, ERREXITMSG1),
+         COMMAND, "-f", CONFIG_DIR, "--fd-gui", FIFO_OUT, "--fd-nfy", FIFO_IN],
+        ["%s=%s" % p for p in os.environ.items()],
+        GLib.SpawnFlags.DEFAULT)
+    window.add(v)
+    window.connect("window-state-event", ui_focus.cb_state)
+    window.connect('delete-event', cb_quit)
+    window.maximize()
+    window.show_all()
+
+    # main loop
+    Gtk.main()
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
