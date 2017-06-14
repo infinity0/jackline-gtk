@@ -44,7 +44,9 @@ except ImportError:
     pycanberra.Canberra = Canberra
     del Canberra
 
-COMMAND = "jackline"
+def fifo_in_path(conf_dir): return os.path.join(conf_dir, "jackline-gtk.fifo")
+def fifo_out_path(conf_dir): return os.path.join(conf_dir, "jackline.fifo")
+
 PROGNAME = "jackline-gtk"
 PROGTITLE = "Jackline Messenger"
 ERREXITMSG0 = "jackline exited abnormally"
@@ -56,10 +58,10 @@ def start_thread(target):
     thread.start()
     return thread
 
-def serve_fifo(fn, m, serve_fp):
+def serve_fifo(fn, m, serve_fp, *args):
     while True:
         with open(fn, m) as fp:
-            serve_fp(fp)
+            serve_fp(fp, *args)
         # fifo closed; reopen
 
 def for_lines_in_file(fp, handle_line):
@@ -76,8 +78,9 @@ def for_lines_in_file(fp, handle_line):
         handle_line(line)
 
 class UINotify(object):
-    def __init__(self, window):
+    def __init__(self, window, ui_focus_child):
         super(UINotify, self).__init__()
+        self.ui_focus_child = ui_focus_child
         self._window = window
         self._icons = Gtk.IconTheme.get_default()
         self._mail_unread_icon = self._icons.load_icon("mail-unread", 48, 0)
@@ -93,8 +96,10 @@ class UINotify(object):
 
         if "notify" in event:
             self.handle_notify()
+        self.ui_focus_child.set_systray_icon_visibility("notify" in event)
 
     def handle_notify(self):
+        """Issue a 'message received' notification popup"""
         n = Notify.Notification.new(PROGTITLE, "Message received")
         n.set_urgency(Notify.Urgency.NORMAL)
         n.set_category("im.received")
@@ -122,76 +127,166 @@ class UINotify(object):
         self._canberra.destroy()
 
 class UIFocus(object):
+    def __init__(self, notebook):
+        self._app_focus_q = {}
+        self.window   = notebook.get_parent()
+        # http://pygtk.org/docs/pygtk/class-gtknotebook.html
+        self.notebook = notebook
+        # hook ctrl-pageup and ctrl-pagedown:
+        self.window.connect("key-press-event", self.navigation_shortcuts)
+        # hook events for both changing tabs / window focus
+        self.notebook.connect("focus-in-event", self.cb_state)
+        self.window.connect("notify::is-active", self.cb_state)
 
-    def __init__(self):
-        self._app_focus_q = queue.Queue()
+    def navigation_shortcuts(self, o, ev):
+        """Listen for tab switching shortcuts"""
+        page_up = Gtk.accelerator_parse('<Control>Prior')[0]
+        page_dn = Gtk.accelerator_parse('<Control>Next')[0]
 
-    def serve_fp(self, fp):
+        if ev.state == Gdk.ModifierType.CONTROL_MASK and ev.keyval in (page_up, page_dn):
+            modifier = 1
+            if ev.keyval == page_up:
+                modifier = -1
+            pn = self.notebook.get_current_page()
+            ln = len(self.notebook)
+            self.notebook.set_current_page( (pn + ln + modifier) % ln)
+            # returning True inhibits the event from propagating to the pty input:
+            self.cb_state()
+            return True
+        # else: propagate the event to the terminal:
+        return False
+
+    def systray_activate(self, icon_obj, child_obj):
+        def idle_add_switch_tab():
+            # switch to the tab corresponding to this icon:
+            self.notebook.set_current_page(self.notebook.page_num(child_obj))
+            # TODO figure out how to grab focus in a less flashy way than below?
+            self.window.hide()
+            self.window.show()
+        GLib.idle_add(idle_add_switch_tab)
+        # TODO consider emitting ctrl-q? (wait x millisec and see if the notification goes away? does jackline allow us tell if the notification was for the currently focused user?)
+
+    def add_systray_icon(self, child):
+        systray = Gtk.StatusIcon.new_from_stock(Gtk.STOCK_ABOUT)
+        systray.connect_data('activate', self.systray_activate, child)
+        #systray.set_tooltip('Jackline: New message received')
+        child.set_systray_icon_visibility = lambda bool_visible: GLib.idle_add(systray.set_visible, bool_visible)
+        child.tray = systray
+
+##    def show_or_hide_systrays(self):
+##        """Shows or hides the systray icon for a jackline instance. Having this as a separate function would allow the user to configure whether or not they want the systray icon to show when Jackline has focus (but unread messages). The default is to do so."""
+
+    def add_tab(self, child):
+        """set up notify hooks for a Vte.Terminal"""
+        self._app_focus_q[child] = queue.Queue()
+        self.add_systray_icon(child)
+
+        FIFO_IN = fifo_in_path(child.JACKLINE_CONFIG_DIR)
+        try: os.mkfifo(FIFO_IN)
+        except FileExistsError: pass
+        finally: atexit.register(os.remove, FIFO_IN) # TODO re-use old or ecreate new if already existing?
+
+        def handle_incoming():
+           """Issue an alert when jackline tells us there are notifications"""
+           with UINotify(self.window, child) as observer:
+              serve_fifo(FIFO_IN, "r", lambda fp:
+                   for_lines_in_file(fp, lambda line:
+                       observer.handle_line(line)))
+        start_thread(handle_incoming)
+
+        FIFO_OUT = fifo_out_path(child.JACKLINE_CONFIG_DIR)
+        try: os.mkfifo(FIFO_OUT)
+        except FileExistsError: pass
+        finally: atexit.register(os.remove, FIFO_OUT)
+        def handle_outgoing():
+            """Tell jackline whether or not we are currently focused on this tab"""
+            serve_fifo(FIFO_OUT, "w", self.serve_fp, child)
+        start_thread(handle_outgoing)
+
+    def serve_fp(self, fp, child):
         while True:
-            line = self._app_focus_q.get()
+            line = self._app_focus_q[child].get()
             if not line: break
+            self._app_focus_q[child].task_done()
             fp.write("%s\n" % line.strip())
             fp.flush()
         fp.close()
 
-    def cb_state(self, window, evt):
-        if evt.new_window_state & Gdk.WindowState.FOCUSED:
-            self._app_focus_q.put("gui_focus true")
-        else:
-            self._app_focus_q.put("gui_focus false")
+    def cb_state(self, *ignoring_args):
+        for c in self.notebook.get_children():
+            if self.notebook.page_num(c) == self.notebook.get_current_page() and self.window.is_active():
+                self._app_focus_q[c].put("gui_focus true")
+            else:
+                self._app_focus_q[c].put("gui_focus false")
 
-def main(args):
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-f", dest="config_dir", metavar="DIR",
-        default="~/.config/ocaml-xmpp-client/",
-        help="configuration directory. (default:%(default)s)")
-    args = parser.parse_args(args)
-
-    CONFIG_DIR = os.path.expanduser(args.config_dir)
-    FIFO_IN = os.path.join(CONFIG_DIR, "jackline-gtk.fifo")
-    FIFO_OUT = os.path.join(CONFIG_DIR, "jackline.fifo")
-
-    # init
-    Gdk.threads_init()
-    Notify.init(PROGNAME)
+def add_jackline_tab(window, notebook, ui_focus, COMMAND, CONFIG_DIR):
     v = Vte.Terminal()
-    window = Gtk.Window()
-    window.set_title(PROGTITLE)
-    windowicon = window.render_icon(Gtk.STOCK_UNDERLINE, Gtk.IconSize.LARGE_TOOLBAR)
-    window.set_icon(windowicon)
+    v.JACKLINE_CONFIG_DIR = CONFIG_DIR
+    ui_focus.add_tab(v)
 
-    # set up notify hooks
-    os.mkfifo(FIFO_IN); atexit.register(os.remove, FIFO_IN)
-    def handle_incoming():
-        with UINotify(window) as observer:
-            serve_fifo(FIFO_IN, "r", lambda fp:
-                for_lines_in_file(fp, lambda line:
-                    observer.handle_line(line)))
-    start_thread(handle_incoming)
-
-    # set up ui_focus hooks
-    ui_focus = UIFocus()
-    os.mkfifo(FIFO_OUT); atexit.register(os.remove, FIFO_OUT)
-    def handle_outgoing():
-        serve_fifo(FIFO_OUT, "w", ui_focus.serve_fp)
-    start_thread(handle_outgoing)
-
-    def cb_quit(o, e):
-        Gtk.main_quit()
+    def cb_close_tab(widget, child):
+        # TODO consider if we should remove FIFOs when we close the tab
+        notebook.remove_page(notebook.page_num(widget))
+        # check if we were only left, quit if so
+        if len(notebook) == 0:
+            Gtk.main_quit()
+    v.connect("child-exited", cb_close_tab)
 
     # start jackline
-    v.connect("child-exited", cb_quit)
     v.spawn_sync(
         Vte.PtyFlags.DEFAULT,
         os.getcwd(),
         ["/bin/sh", "-c",
          '%s "$@" || read -p "%s: $?; %s" x;' % (COMMAND, ERREXITMSG0, ERREXITMSG1),
-         COMMAND, "-f", CONFIG_DIR, "--fd-gui", FIFO_OUT, "--fd-nfy", FIFO_IN],
+         COMMAND, "-f", CONFIG_DIR, "--fd-gui", fifo_out_path(CONFIG_DIR), "--fd-nfy", fifo_in_path(CONFIG_DIR)],
         ["%s=%s" % p for p in os.environ.items()],
         GLib.SpawnFlags.DEFAULT)
-    window.add(v)
-    window.connect("window-state-event", ui_focus.cb_state)
-    window.connect('delete-event', cb_quit)
+
+    notebook.append_page(v)
+
+    # initialize focus somewhere (otherwise won't trigger focus changes when changing tabs before focusing on a child):
+    notebook.set_focus_child(v)
+
+    # set the title of the tab to the directory name containing the config:
+    notebook.set_tab_label_text(v, os.path.basename(os.path.abspath(CONFIG_DIR)))
+
+def main(args):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-c", dest="COMMAND", metavar="COMMAND",
+        help="path to jackline binary. (default:%(default)s)",
+        default="jackline")
+    parser.add_argument('config_dirs',
+        nargs='*', metavar='DIR',
+        default=["~/.config/ocaml-xmpp-client/"],
+        help="configuration directory. (default:%(default)s)")
+    args = parser.parse_args(args)
+
+    CONFIG_DIRS = set([x for x in [os.path.expanduser(d) for d in args.config_dirs]
+                         if os.access(x, os.W_OK) ])
+    if len(CONFIG_DIRS) != len(args.config_dirs):
+        raise Exception('No usable configuration directories provided - check access permissions to %s' % set(args.config_dirs).difference(CONFIG_DIRS))
+
+    # init
+    Gdk.threads_init()
+    Notify.init(PROGNAME)
+    window = Gtk.Window()
+    window.set_title(PROGTITLE)
+    windowicon = window.render_icon(Gtk.STOCK_UNDERLINE, Gtk.IconSize.LARGE_TOOLBAR)
+    window.set_icon(windowicon)
+
+    # close jackline-gtk when user clicks [x]
+    window.connect('delete-event', Gtk.main_quit)
+
+    # set up tabs in a "Notebook" (Gtk term)
+    notebook = Gtk.Notebook()
+    notebook.set_property('show-tabs', True)
+    window.add(notebook)
+
+    ui_focus = UIFocus(notebook)
+
+    for conf_dir in CONFIG_DIRS:
+        add_jackline_tab(window, notebook, ui_focus, args.COMMAND, conf_dir)
+
     window.maximize()
     window.show_all()
 
