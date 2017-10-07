@@ -91,12 +91,17 @@ class UINotify(object):
 
     def handle_line(self, line):
         state, event, args = (line + " ").split(" ", 2)
-        has_notifications = "notification" in state
-        GLib.idle_add(self._gtk_urgency, has_notifications)
+        has_notifications = "_notifications" in state
+        self.gtk_urgency(has_notifications)
+        self.ui_focus_child.set_systray_icon_visibility(has_notifications)
 
-        if "notify" in event:
+        # scenarios:
+        # 1) focused contact receives msg: "connected notify_contact clear_all_notifications"
+        #    has_notification == False ; "notify_contact" in event == True
+        # 2) unfocused contact receives msg: "connected_notifications notify_contact"
+        #    has_notifications == True ; "notify_contact" in event == True
+        if has_notifications and "notify_contact" in event:
             self.handle_notify()
-        self.ui_focus_child.set_systray_icon_visibility("notify" in event)
 
     def handle_notify(self):
         """Issue a 'message received' notification popup"""
@@ -110,8 +115,8 @@ class UINotify(object):
     # GTK stuff must be done via GLib.idle_add
     # see https://wiki.gnome.org/Projects/PyGObject/Threading
 
-    def _gtk_urgency(self, urgency):
-        self._window.set_urgency_hint(urgency)
+    def gtk_urgency(self, urgency):
+        GLib.idle_add(self._window.set_urgency_hint, urgency)
 
     def _gtk_notify(self, n):
         n.show()
@@ -135,8 +140,12 @@ class UIFocus(object):
         # hook ctrl-pageup and ctrl-pagedown:
         self.window.connect("key-press-event", self.navigation_shortcuts)
         # hook events for both changing tabs / window focus
+        self.notebook.connect("focus-tab", self.cb_state)
+        self.notebook.connect("change-current-page", self.cb_state)
+        self.notebook.connect("select-page", self.cb_state, True)
         self.notebook.connect("focus-in-event", self.cb_state)
         self.window.connect("notify::is-active", self.cb_state)
+        self.window.connect("focus-in-event", self.cb_state)
 
     def navigation_shortcuts(self, o, ev):
         """Listen for tab switching shortcuts"""
@@ -150,8 +159,8 @@ class UIFocus(object):
             pn = self.notebook.get_current_page()
             ln = len(self.notebook)
             self.notebook.set_current_page( (pn + ln + modifier) % ln)
-            # returning True inhibits the event from propagating to the pty input:
             self.cb_state()
+            # returning True inhibits the event from propagating to the pty input:
             return True
         # else: propagate the event to the terminal:
         return False
@@ -163,6 +172,7 @@ class UIFocus(object):
             # TODO figure out how to grab focus in a less flashy way than below?
             self.window.hide()
             self.window.show()
+
         GLib.idle_add(idle_add_switch_tab)
         # TODO consider emitting ctrl-q? (wait x millisec and see if the notification goes away? does jackline allow us tell if the notification was for the currently focused user?)
 
@@ -273,6 +283,7 @@ def main(args):
     window.set_title(PROGTITLE)
     windowicon = window.render_icon(Gtk.STOCK_UNDERLINE, Gtk.IconSize.LARGE_TOOLBAR)
     window.set_icon(windowicon)
+    window.set_can_focus(False)
 
     # close jackline-gtk when user clicks [x]
     window.connect('delete-event', Gtk.main_quit)
@@ -280,6 +291,7 @@ def main(args):
     # set up tabs in a "Notebook" (Gtk term)
     notebook = Gtk.Notebook()
     notebook.set_property('show-tabs', True)
+    notebook.set_can_focus(False)
     window.add(notebook)
 
     ui_focus = UIFocus(notebook)
