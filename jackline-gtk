@@ -93,7 +93,7 @@ class UINotify(object):
         state, event, args = (line + " ").split(" ", 2)
         has_notifications = "_notifications" in state
         self.gtk_urgency(has_notifications)
-        self.ui_focus_child.set_systray_icon_visibility(has_notifications)
+        GLib.idle_add(self.ui_focus_child.systray.set_visible, has_notifications)
 
         # scenarios:
         # 1) focused contact receives msg: "connected notify_contact clear_all_notifications"
@@ -180,8 +180,7 @@ class UIFocus(object):
         systray = Gtk.StatusIcon.new_from_stock(Gtk.STOCK_ABOUT)
         systray.connect_data('activate', self.systray_activate, child)
         #systray.set_tooltip('Jackline: New message received')
-        child.set_systray_icon_visibility = lambda bool_visible: GLib.idle_add(systray.set_visible, bool_visible)
-        child.tray = systray
+        child.systray = systray
 
 ##    def show_or_hide_systrays(self):
 ##        """Shows or hides the systray icon for a jackline instance. Having this as a separate function would allow the user to configure whether or not they want the systray icon to show when Jackline has focus (but unread messages). The default is to do so."""
