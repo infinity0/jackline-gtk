@@ -50,7 +50,7 @@ def fifo_out_path(conf_dir): return os.path.join(conf_dir, "jackline.fifo")
 PROGNAME = "jackline-gtk"
 PROGTITLE = "Jackline Messenger"
 ERREXITMSG0 = "jackline exited abnormally"
-ERREXITMSG1 = "press enter to continue..."
+ERREXITMSG1 = "press enter to restart..."
 
 def start_thread(target):
     thread = threading.Thread(target=target)
@@ -61,7 +61,8 @@ def start_thread(target):
 def serve_fifo(fn, m, serve_fp, *args):
     while True:
         with open(fn, m) as fp:
-            serve_fp(fp, *args)
+            try: serve_fp(fp, *args)
+            except BrokenPipeError: pass
         # fifo closed; reopen
 
 def for_lines_in_file(fp, handle_line):
@@ -176,19 +177,13 @@ class UIFocus(object):
         GLib.idle_add(idle_add_switch_tab)
         # TODO consider emitting ctrl-q? (wait x millisec and see if the notification goes away? does jackline allow us tell if the notification was for the currently focused user?)
 
-    def add_systray_icon(self, child):
-        systray = Gtk.StatusIcon.new_from_stock(Gtk.STOCK_ABOUT)
-        systray.connect_data('activate', self.systray_activate, child)
-        #systray.set_tooltip('Jackline: New message received')
-        child.systray = systray
-
-##    def show_or_hide_systrays(self):
-##        """Shows or hides the systray icon for a jackline instance. Having this as a separate function would allow the user to configure whether or not they want the systray icon to show when Jackline has focus (but unread messages). The default is to do so."""
-
     def add_tab(self, child):
         """set up notify hooks for a Vte.Terminal"""
         self._app_focus_q[child] = queue.Queue()
-        self.add_systray_icon(child)
+
+        child.systray = Gtk.StatusIcon.new_from_stock(Gtk.STOCK_ABOUT)
+        #systray.set_tooltip('Jackline: New message received')
+        child.systray.connect_data('activate', self.systray_activate, child)
 
         FIFO_IN = fifo_in_path(child.JACKLINE_CONFIG_DIR)
         try: os.mkfifo(FIFO_IN)
@@ -246,7 +241,7 @@ def add_jackline_tab(window, notebook, ui_focus, COMMAND, CONFIG_DIR):
         Vte.PtyFlags.DEFAULT,
         os.getcwd(),
         ["/bin/sh", "-c",
-         '%s "$@" || read -p "%s: $?; %s" x;' % (COMMAND, ERREXITMSG0, ERREXITMSG1),
+         'until %s "$@"; do read -p "%s: $?; %s" x; done' % (COMMAND, ERREXITMSG0, ERREXITMSG1),
          COMMAND, "-f", CONFIG_DIR, "--fd-gui", fifo_out_path(CONFIG_DIR), "--fd-nfy", fifo_in_path(CONFIG_DIR)],
         ["%s=%s" % p for p in os.environ.items()],
         GLib.SpawnFlags.DEFAULT)
