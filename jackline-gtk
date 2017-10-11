@@ -230,6 +230,7 @@ def add_jackline_tab(window, notebook, ui_focus, COMMAND, CONFIG_DIR):
 
     def cb_close_tab(widget, child):
         # TODO consider if we should remove FIFOs when we close the tab
+        # TODO remove systray icon / ui_focus
         notebook.remove_page(notebook.page_num(widget))
         # check if we were only left, quit if so
         if len(notebook) == 0:
