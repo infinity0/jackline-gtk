@@ -152,6 +152,13 @@ class UIFocus(object):
         """Listen for tab switching shortcuts"""
         page_up = Gtk.accelerator_parse('<Control>Prior')[0]
         page_dn = Gtk.accelerator_parse('<Control>Next')[0]
+        ctrl_c = Gtk.accelerator_parse('<Control>C')[0]
+
+        if ev.state == Gdk.ModifierType.CONTROL_MASK and ev.keyval == ctrl_c:
+            selected = Gtk.Clipboard.get(Gdk.SELECTION_PRIMARY).wait_for_text()
+            if selected:
+                Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text(selected, -1)
+            return
 
         if ev.state == Gdk.ModifierType.CONTROL_MASK and ev.keyval in (page_up, page_dn):
             modifier = 1
